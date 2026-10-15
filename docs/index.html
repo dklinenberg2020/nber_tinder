@@ -46,13 +46,12 @@
     padding: max(12px, env(safe-area-inset-top)) 16px 12px;
     max-width: 560px; width: 100%; margin: 0 auto;
   }
-  h1 { font: 700 20px/1 Georgia, "Times New Roman", serif; margin: 0; letter-spacing: -.01em; white-space: nowrap; }
-  @media (max-width: 440px) { header { flex-wrap: wrap; gap: 10px; } nav { width: 100%; } nav button { flex: 1; } }
+  h1 { font: 700 20px/1 Georgia, "Times New Roman", serif; margin: 0; letter-spacing: -.01em; }
   h1 span { color: var(--accent); }
   nav { display: flex; background: var(--line); border-radius: 999px; padding: 3px; }
   nav button {
     border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 14px; font-weight: 600;
-    padding: 6px 14px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+    padding: 6px 14px; border-radius: 999px; cursor: pointer;
   }
   nav button[aria-selected="true"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
   main { flex: 1; display: flex; flex-direction: column; max-width: 560px; width: 100%; margin: 0 auto; padding: 0 16px 16px; min-height: 0; }
@@ -117,21 +116,6 @@
   .item .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
   .item .row .btn { padding: 5px 10px; font-size: 12px; }
   .none { color: var(--muted); text-align: center; padding: 40px 10px; }
-  .sync { color: var(--muted); font-size: 13px; margin: -4px 0 12px; }
-  .sync a { color: var(--accent); cursor: pointer; }
-  #overlap { flex: 1; overflow-y: auto; }
-  #overlap h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 18px 0 8px; }
-  .pill { display: inline-block; font-size: 12px; font-weight: 600; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); padding: 2px 8px; border-radius: 999px; margin: 2px 4px 0 0; }
-  .pairs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-  .pairs li { display: flex; justify-content: space-between; gap: 8px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; font-size: 14px; }
-  .pairs b { font-variant-numeric: tabular-nums; }
-  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; padding: 16px; z-index: 20; }
-  .modal form { background: var(--card); color: var(--ink); border-radius: 16px; padding: 22px; max-width: 380px; width: 100%; box-shadow: var(--shadow); }
-  .modal h2 { margin: 0 0 6px; font-size: 19px; }
-  .modal p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
-  .modal input { width: 100%; font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
-  .modal .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); opacity: 0;
     background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 10px; font-size: 14px;
@@ -146,7 +130,6 @@
   <nav role="tablist">
     <button role="tab" id="tab-discover" aria-selected="true">Discover</button>
     <button role="tab" id="tab-saved" aria-selected="false">Saved <span id="saved-count"></span></button>
-    <button role="tab" id="tab-overlap" aria-selected="false" hidden>Overlap</button>
   </nav>
 </header>
 
@@ -171,33 +154,11 @@
         <button class="btn" id="reset" title="Show skipped papers again">Reset skipped</button>
       </div>
     </div>
-    <p class="sync" id="sync-status" hidden></p>
     <ul class="list" id="saved-list"></ul>
   </section>
-
-  <section id="overlap" hidden>
-    <div class="saved-head">
-      <h2>Overlap</h2>
-      <button class="btn" id="refresh-overlap">Refresh</button>
-    </div>
-    <div id="overlap-body"><p class="none">Loading…</p></div>
-  </section>
 </main>
-
-<div class="modal" id="name-modal" hidden>
-  <form id="name-form">
-    <h2>Who's swiping?</h2>
-    <p>Your saves are shared with friends using this link so you can see shared interests. Use a name per device, like <em>Danny – phone</em>.</p>
-    <input id="name-input" maxlength="60" placeholder="Your name – device" autocomplete="off" required>
-    <div class="row">
-      <button type="button" class="btn" id="name-skip">Keep private</button>
-      <button type="submit" class="btn primary">Start</button>
-    </div>
-  </form>
-</div>
 <div class="toast" id="toast"></div>
 
-<script src="config.js"></script>
 <script>
 (() => {
   const KEY = "nberSwipe.v1";
@@ -205,126 +166,9 @@
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   // --- state (saved in this browser only) ---
-  // name: null = not asked yet, "" = keep private
-  let state = { seen: {}, saved: [], history: [], name: null, pending: [] };
+  let state = { seen: {}, saved: [], history: [] };
   try { Object.assign(state, JSON.parse(localStorage.getItem(KEY)) || {}); } catch {}
   const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
-
-  // --- shared Google Sheet sync (optional, see config.js) ---
-  const SHEET_URL = ((window.NBER_SWIPE_CONFIG || {}).sheetUrl || "").trim();
-  const sharing = () => Boolean(SHEET_URL && state.name);
-
-  function logEvent(p, dir) {
-    if (!sharing()) return;
-    state.pending.push({ id: p.id, title: p.title, year: p.year, dir, ts: Date.now() });
-    persist();
-    clearTimeout(flushTimer);
-    flushTimer = setTimeout(flush, 1500);
-  }
-
-  let flushing = false, flushTimer;
-  async function flush() {
-    if (flushing || !sharing() || !state.pending.length) return;
-    flushing = true;
-    const batch = state.pending.slice(0, 200);
-    let ok = false;
-    try {
-      // text/plain avoids a CORS preflight, which Apps Script can't answer
-      const r = await fetch(SHEET_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ name: state.name, events: batch }),
-      });
-      ok = (await r.json()).ok;
-    } catch {}
-    if (ok) {
-      state.pending = state.pending.slice(batch.length);
-      persist();
-    }
-    flushing = false;
-    renderSyncStatus();
-    if (state.pending.length) flushTimer = setTimeout(flush, ok ? 0 : 15000);
-  }
-
-  // Best effort on close; anything unconfirmed is resent later (duplicates are harmless).
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden" && sharing() && state.pending.length && navigator.sendBeacon) {
-      navigator.sendBeacon(SHEET_URL, new Blob([JSON.stringify({ name: state.name, events: state.pending.slice(0, 200) })], { type: "text/plain" }));
-    }
-  });
-
-  function askName() {
-    $("name-input").value = state.name || "";
-    $("name-modal").hidden = false;
-    $("name-input").focus();
-  }
-  $("name-form").onsubmit = (e) => {
-    e.preventDefault();
-    const name = $("name-input").value.trim();
-    if (!name) return;
-    const first = !state.name;
-    state.name = name;
-    $("name-modal").hidden = true;
-    // share what was saved before sharing was turned on
-    if (first) state.saved.slice().reverse().forEach((p) => logEvent(p, "R"));
-    persist(); flush(); renderSyncStatus();
-    $("tab-overlap").hidden = false;
-  };
-  $("name-skip").onclick = () => {
-    state.name = "";
-    persist();
-    $("name-modal").hidden = true;
-    renderSyncStatus();
-  };
-
-  function renderSyncStatus() {
-    const el = $("sync-status");
-    if (!SHEET_URL) { el.hidden = true; return; }
-    el.hidden = false;
-    el.innerHTML = sharing()
-      ? `Sharing as <b>${esc(state.name)}</b>${state.pending.length ? ` · ${state.pending.length} waiting to sync` : " · synced"} · <a id="change-name">change name</a> · <a id="stop-sharing">stop sharing</a>`
-      : `Saves are private to this browser · <a id="change-name">share with friends</a>`;
-    $("change-name").onclick = askName;
-    const stop = $("stop-sharing");
-    if (stop) stop.onclick = () => { state.name = ""; state.pending = []; persist(); renderSyncStatus(); };
-  }
-
-  async function renderOverlap() {
-    const body = $("overlap-body");
-    body.innerHTML = `<p class="none">Loading…</p>`;
-    let data;
-    try { data = await (await fetch(SHEET_URL)).json(); }
-    catch { body.innerHTML = `<p class="none">Couldn't load the shared list.</p>`; return; }
-
-    const me = state.name;
-    const names = Object.keys(data.people);
-    const shared = data.papers.filter((p) => p.savedBy.length > 1)
-      .sort((a, b) => b.savedBy.length - a.savedBy.length || (b.savedBy.includes(me) - a.savedBy.includes(me)));
-
-    const saves = {};
-    data.papers.forEach((p) => p.savedBy.forEach((n) => (saves[n] = saves[n] || new Set()).add(p.id)));
-    const pairs = [];
-    for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) {
-      const a = saves[names[i]] || new Set(), b = saves[names[j]] || new Set();
-      const n = [...a].filter((id) => b.has(id)).length;
-      if (n) pairs.push({ a: names[i], b: names[j], n });
-    }
-    pairs.sort((x, y) => y.n - x.n);
-
-    const pill = (n) => `<span class="pill">${esc(n)}${n === me ? " (you)" : ""}</span>`;
-    body.innerHTML = `
-      <h3>Saved by more than one person</h3>
-      ${shared.length ? `<ul class="list">${shared.map((p) => `
-        <li class="item">
-          <a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a>
-          <div class="sub">${esc(p.year)} · saved by ${p.savedBy.length}</div>
-          <div>${p.savedBy.map(pill).join("")}</div>
-        </li>`).join("")}</ul>` : `<p class="none">No overlap yet. Keep swiping!</p>`}
-      <h3>Most in common</h3>
-      ${pairs.length ? `<ul class="pairs">${pairs.slice(0, 15).map((x) => `<li><span>${esc(x.a)} &amp; ${esc(x.b)}</span><b>${x.n} shared</b></li>`).join("")}</ul>` : `<p class="none">Nobody has saved the same paper yet.</p>`}
-      <h3>Everyone</h3>
-      <ul class="pairs">${names.map((n) => `<li><span>${esc(n)}${n === me ? " (you)" : ""}</span><span>${data.people[n].saved} saved · ${data.people[n].skipped} skipped</span></li>`).join("") || `<li>No one yet</li>`}</ul>`;
-  }
 
   let papers = [];
   let queue = [];
@@ -398,7 +242,6 @@
       state.saved.unshift(snap);
     }
     persist();
-    logEvent(p, dir);
     queue.shift();
     if (card) {
       card.classList.add("fly");
@@ -416,7 +259,7 @@
     state.saved = state.saved.filter((s) => s.id !== id);
     persist();
     const p = papers.find((x) => x.id === id);
-    if (p) { queue.unshift(p); logEvent(p, "U"); }
+    if (p) queue.unshift(p);
     render();
   }
 
@@ -460,20 +303,14 @@
 
   // --- wiring ---
   function showTab(name) {
-    for (const t of ["discover", "saved", "overlap"]) {
-      $(t).hidden = name !== t;
-      $("tab-" + t).setAttribute("aria-selected", name === t);
-    }
-    if (name === "saved") { renderSaved(); renderSyncStatus(); }
-    if (name === "overlap") renderOverlap();
+    $("discover").hidden = name !== "discover";
+    $("saved").hidden = name !== "saved";
+    $("tab-discover").setAttribute("aria-selected", name === "discover");
+    $("tab-saved").setAttribute("aria-selected", name === "saved");
+    if (name === "saved") renderSaved();
   }
   $("tab-discover").onclick = () => showTab("discover");
   $("tab-saved").onclick = () => showTab("saved");
-  $("tab-overlap").onclick = () => showTab("overlap");
-  $("refresh-overlap").onclick = renderOverlap;
-  $("tab-overlap").hidden = !SHEET_URL;
-  if (SHEET_URL && state.name === null) askName();
-  flush();
   $("btn-no").onclick = () => decide("L");
   $("btn-yes").onclick = () => decide("R");
   $("btn-open").onclick = () => open(queue[0]);
@@ -482,10 +319,8 @@
   $("saved-list").onclick = (e) => {
     const id = e.target.dataset.remove;
     if (!id) return;
-    const removed = state.saved.find((s) => s.id === id);
     state.saved = state.saved.filter((s) => s.id !== id);
     persist(); renderSaved(); render();
-    if (removed) logEvent(removed, "U");
   };
   $("reset").onclick = () => {
     for (const [id, d] of Object.entries(state.seen)) if (d === "L") delete state.seen[id];
@@ -499,7 +334,7 @@
   };
 
   document.addEventListener("keydown", (e) => {
-    if ($("discover").hidden || !$("name-modal").hidden || e.target.closest("input, textarea") || e.metaKey || e.ctrlKey || e.altKey) return;
+    if ($("discover").hidden || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === "ArrowLeft") decide("L");
     else if (e.key === "ArrowRight") decide("R");
     else if (e.key === "Enter") open(queue[0]);
