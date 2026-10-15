@@ -71,15 +71,26 @@ def get(url, retries=3):
             time.sleep(2 ** attempt)
 
 
+MOJIBAKE = re.compile("[Â-ô][\u0080-¿ŒœŠšŸŽžƒˆ˜"
+                      "–—‘-„†-•…‰‹›€™]{1,3}")
+
+
 def fix_mojibake(s):
-    """IDEAS sometimes serves doubly UTF-8-encoded text ("nonâ€‘benchmarked")."""
-    if re.search(r"[ÃÂ]|â€", s):
+    """IDEAS sometimes serves doubly UTF-8-encoded text ("nonâ€‘benchmarked").
+
+    Repaired piece by piece, so one unrecoverable character doesn't block the rest.
+    """
+    def repair(m):
         for enc in ("cp1252", "latin-1"):
             try:
-                return s.encode(enc).decode("utf-8")
+                return m.group(0).encode(enc).decode("utf-8")
             except UnicodeError:
                 pass
-    return s
+        return m.group(0)
+
+    s = s.replace("â€\u009d", "”")
+    s = MOJIBAKE.sub(repair, s)
+    return re.sub(r"â€(?=\W|$)", "”", s)  # closing quote whose last byte (0x9d) was dropped
 
 
 def clean(text):
@@ -201,6 +212,8 @@ def ideas_source(label, series):
         m = re.search(r'<div id="abstract-body">(.*?)</div>', page_html, re.S)
         abstract = m.group(1) if m else ""
         date = (meta("citation_publication_date") or meta("date")).replace("/", "-")[:10]
+        if not re.match(r"\d{4}(-(0[1-9]|1[0-2])(-\d\d)?)?$", date):  # e.g. "2019-13" on some entries
+            date = date[:4]
         # "Last, First & Last, First" -> ["First Last", ...]
         authors = [" ".join(reversed([x.strip() for x in a.split(",", 1)])) for a in meta("author").split(" & ")]
         keywords = "; ".join(x for x in (meta("keywords"), "JEL: " + meta("jel_code") if meta("jel_code") else "") if x)
@@ -280,7 +293,8 @@ def source_of(p):
 def main():
     existing = {}
     if OUT.exists():
-        for p in json.loads(OUT.read_text())["papers"]:
+        data = json.loads(OUT.read_text())
+        for p in data["papers"] + data.get("duplicates", []):
             p.setdefault("source", "NBER")
             existing[p["id"]] = p
 
@@ -331,15 +345,24 @@ def main():
 
     result = [p for p in result if p.get("title")]
     result.sort(key=lambda p: p.get("sort_date") or p.get("date", ""), reverse=True)
+    # The same paper is often posted in several series (e.g. IMF and CEPR). Keep the earliest
+    # listing, so a paper someone already swiped doesn't come back when another series posts it.
+    # Duplicates are stored separately so later runs don't fetch them again.
+    seen_titles, deduped, duplicates = set(), [], []
+    for p in reversed(result):
+        key = re.sub(r"[^a-z0-9]", "", p["title"].lower())
+        (duplicates if key in seen_titles else deduped).append(p)
+        seen_titles.add(key)
+    result = deduped[::-1]
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(
-        {"updated": time.strftime("%Y-%m-%d"), "papers": result},
+        {"updated": time.strftime("%Y-%m-%d"), "papers": result, "duplicates": duplicates},
         ensure_ascii=False, separators=(",", ":"),
     ))
     counts = {}
     for p in result:
         counts[source_of(p)] = counts.get(source_of(p), 0) + 1
-    print(f"Wrote {len(result)} papers to {OUT}: {counts}")
+    print(f"Wrote {len(result)} papers to {OUT}: {counts} ({len(duplicates)} cross-listed duplicates hidden)")
 
 
 def _safe(detail, stub):

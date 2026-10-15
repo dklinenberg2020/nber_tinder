@@ -212,19 +212,25 @@
   let queue = [];
 
   // --- topics & ranking ---
-  // Each topic: regexes tried against title, abstract and keywords/JEL codes (title hits count triple).
+  // Each topic has strong terms (one mention in the abstract or keywords/JEL is enough) and weak
+  // terms (need two mentions, or a mention alongside another term). Any term in the title counts.
   const TOPICS = [
-    { id: "geo", name: "Geoeconomics", on: true, re: [/geo-?econom/, /geopolit/, /sanction/, /coerci/, /export controls?/, /fragmentation/, /friend-?shoring/, /de-?risking/, /decoupl/, /(national|economic) security/, /weaponi[sz]/, /statecraft/, /industrial polic/, /critical minerals?/, /rare earth/, /u\.?s\.?-china|china-u\.?s\./, /dollar dominance/, /reserve currenc/, /jel:.*\bf5\d/] },
-    { id: "trade", name: "Trade", on: true, re: [/\btrade\b(?!-off| ?offs?\b| credit)/, /tariff/, /\bimport(s|ed|ing|ers?)?\b/, /\bexport(s|ed|ing|ers?)?\b/, /(supply|value) chains?/, /offshor|reshor|nearshor/, /\bwto\b/, /protectionis/, /gravity (model|equation)/, /customs union/, /jel:.*\bf1\d/] },
-    { id: "synth", name: "Synthetic control", on: true, re: [/synthetic control/, /synthetic diff/, /synthetic did/, /synthetic counterfactual/, /comparative case stud/] },
-    { id: "money", name: "Monetary policy", re: [/monetary policy/, /central bank/, /interest rates?/, /inflation/, /jel:.*\be5\d/] },
-    { id: "finance", name: "Finance & banking", re: [/\bbanks?\b|banking/, /financial stability/, /asset pric/, /\bcredit\b/, /jel:.*\bg[12]\d/] },
-    { id: "labor", name: "Labor", re: [/labou?r market/, /\bwages?\b/, /employment/, /jel:.*\bj\d\d/] },
-    { id: "dev", name: "Development", re: [/developing countr/, /low-income countr/, /poverty/, /jel:.*\bo1\d/] },
-    { id: "climate", name: "Climate & energy", re: [/climate/, /carbon/, /emissions/, /\benergy\b/, /jel:.*\bq[45]\d/] },
-    { id: "ai", name: "AI & technology", re: [/artificial intelligence/, /\bai\b/, /machine learning/, /automation/, /large language model/] },
-    { id: "pol", name: "Political economy", re: [/election/, /voting|voters/, /populis/, /polariz/, /jel:.*\bd7\d/] },
-    { id: "fiscal", name: "Fiscal & public debt", re: [/fiscal/, /public debt|sovereign debt/, /\btax(es|ation)?\b/, /jel:.*\bh[56]\d/] },
+    { id: "geo", name: "Geoeconomics", on: true,
+      strong: [/geo-?econom/, /economic coercion|coercive/, /export controls?/, /friend-?shoring/, /de-?risking/, /weaponi[sz]ed interdependence/, /economic statecraft/, /economic security/, /trade war/, /critical minerals?/, /rare earths?/, /geoeconomic fragmentation/, /dollar dominance/, /jel:.*\bf5[0-2]\b/],
+      weak: [/geopolit/, /\bsanction/, /fragmentation/, /decoupl/, /national security/, /industrial polic/, /u\.?s\.?[-–]china|china[-–]u\.?s\./, /reserve currenc/, /\bconflict\b/, /\bwar\b/] },
+    { id: "trade", name: "Trade", on: true,
+      strong: [/tariff/, /trade polic/, /trade agreement/, /international trade/, /trade (flows|costs|barriers|shocks?|liberali[sz]ation)/, /(global )?(supply|value) chains?/, /\bwto\b/, /protectionis/, /gravity (model|equation)/, /offshoring|reshoring|nearshoring/, /jel:.*\bf1\d\b/],
+      weak: [/\btrade\b(?!-off| ?offs?\b| credit)/, /\bimport(s|ed|ing|ers?)?\b/, /\bexport(s|ed|ing|ers?)?\b/, /customs/] },
+    { id: "synth", name: "Synthetic control", on: true,
+      strong: [/synthetic controls?/, /synthetic diff/, /synthetic did\b/, /synthetic counterfactual/, /comparative case stud/], weak: [] },
+    { id: "money", name: "Monetary policy", strong: [/monetary policy/, /central bank/, /jel:.*\be5[0-2]\b/], weak: [/inflation/, /interest rates?/] },
+    { id: "finance", name: "Finance & banking", strong: [/financial stability/, /asset pric/, /\bbanking\b/, /jel:.*\bg[12]\d\b/], weak: [/\bbanks?\b/, /\bcredit\b/] },
+    { id: "labor", name: "Labor", strong: [/labou?r markets?/, /jel:.*\bj\d\d\b/], weak: [/\bwages?\b/, /employment/, /\bworkers?\b/] },
+    { id: "dev", name: "Development", strong: [/developing countr/, /low-income countr/, /jel:.*\bo1\d\b/], weak: [/poverty/, /\bafrica|india\b/] },
+    { id: "climate", name: "Climate & energy", strong: [/climate/, /carbon/, /jel:.*\bq[45]\d\b/], weak: [/emissions/, /\benergy\b/] },
+    { id: "ai", name: "AI & technology", strong: [/artificial intelligence/, /large language model/, /generative ai/], weak: [/\bai\b/, /machine learning/, /automation/] },
+    { id: "pol", name: "Political economy", strong: [/political economy/, /jel:.*\bd7\d\b/], weak: [/election/, /voting|voters/, /populis/, /polariz/] },
+    { id: "fiscal", name: "Fiscal & public debt", strong: [/fiscal polic/, /public debt|sovereign debt/, /jel:.*\bh[56]\d\b/], weak: [/fiscal/, /\btax(es|ation)?\b/] },
   ];
   state.prefs = state.prefs || { topics: TOPICS.filter((t) => t.on).map((t) => t.id), custom: "", hiddenSources: [] };
 
@@ -235,19 +241,25 @@
   function activeTopics() {
     const list = TOPICS.filter((t) => state.prefs.topics.includes(t.id));
     state.prefs.custom.split(",").map((k) => k.trim().toLowerCase()).filter(Boolean)
-      .forEach((k) => list.push({ name: k, re: [new RegExp(escapeRe(k))] }));
+      .forEach((k) => list.push({ name: k, strong: [new RegExp(escapeRe(k))], weak: [] }));
     return list;
+  }
+  function topicScore(t, title, body) {
+    let score = 0;
+    for (const re of [...t.strong, ...t.weak]) if (re.test(title)) score += 3;
+    for (const re of t.strong) if (re.test(body)) score += 2;
+    for (const re of t.weak) score += Math.min(2, (body.match(new RegExp(re.source, "g")) || []).length);
+    return score;
   }
   function matchedTopics(p) {
     if (!topicCache.has(p.id)) {
       const title = p.title.toLowerCase();
       const body = ((p.abstract || p.summary || "") + " " + (p.keywords || "")).toLowerCase();
-      const hits = [];
-      for (const t of active) if (t.re.some((re) => re.test(title) || re.test(body))) hits.push(t.name);
-      topicCache.set(p.id, hits);
+      topicCache.set(p.id, active.filter((t) => topicScore(t, title, body) >= 2).map((t) => t.name));
     }
     return topicCache.get(p.id);
   }
+
 
   function buildQueue() {
     topicCache.clear();
