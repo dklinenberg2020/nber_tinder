@@ -122,6 +122,24 @@
   .item .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
   .item .row .btn { padding: 5px 10px; font-size: 12px; }
   .none { color: var(--muted); text-align: center; padding: 40px 10px; }
+  h1 { margin-right: auto; }
+  .gear { border: 0; background: transparent; color: var(--muted); font-size: 20px; cursor: pointer; padding: 4px 6px; line-height: 1; }
+  .src { font-weight: 700; font-size: 11px; letter-spacing: .04em; color: var(--muted); border: 1px solid var(--line); padding: 2px 7px; border-radius: 999px; margin-right: 4px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: -6px; }
+  .tag { font-size: 12px; font-weight: 700; color: var(--yes); background: color-mix(in srgb, var(--yes) 13%, transparent); padding: 2px 9px; border-radius: 999px; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; padding: 16px; z-index: 20; }
+  .modal form { background: var(--card); color: var(--ink); border-radius: 16px; padding: 20px; max-width: 420px; width: 100%; max-height: calc(100% - 32px); overflow-y: auto; box-shadow: var(--shadow); }
+  .modal h2 { margin: 0 0 6px; font-size: 17px; }
+  .modal h2:not(:first-child) { margin-top: 18px; }
+  .modal p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chips button { font: inherit; font-size: 14px; font-weight: 600; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--muted); cursor: pointer; }
+  .chips button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .field { display: block; margin-top: 14px; font-size: 14px; font-weight: 600; }
+  .field span { color: var(--muted); font-weight: 400; }
+  .field input { display: block; width: 100%; margin-top: 6px; font: inherit; font-weight: 400; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  .modal .row { display: flex; justify-content: flex-end; margin-top: 18px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); opacity: 0;
     background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 10px; font-size: 14px;
@@ -133,6 +151,7 @@
 <body>
 <header>
   <h1>NBER <span>Swipe</span></h1>
+  <button class="gear" id="open-prefs" title="Topics &amp; sources" aria-label="Topics and sources">⚙︎</button>
   <nav role="tablist">
     <button role="tab" id="tab-discover" aria-selected="true">Discover</button>
     <button role="tab" id="tab-saved" aria-selected="false">Saved <span id="saved-count"></span></button>
@@ -163,6 +182,19 @@
     <ul class="list" id="saved-list"></ul>
   </section>
 </main>
+<div class="modal" id="prefs" hidden>
+  <form id="prefs-form">
+    <h2>Your topics</h2>
+    <p>Papers matching these come first, mixed with the newest papers (2 topic matches, then 1 new paper).</p>
+    <div class="chips" id="topic-chips"></div>
+    <label class="field">Other keywords <span>(comma-separated)</span>
+      <input id="custom-keywords" placeholder="e.g. sovereign debt, steel" autocomplete="off">
+    </label>
+    <h2>Sources</h2>
+    <div class="chips" id="source-chips"></div>
+    <div class="row"><button type="submit" class="btn primary">Done</button></div>
+  </form>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -179,17 +211,90 @@
   let papers = [];
   let queue = [];
 
-  function buildQueue() {
-    queue = papers.filter((p) => !state.seen[p.id]);
+  // --- topics & ranking ---
+  // Each topic: regexes tried against title, abstract and keywords/JEL codes (title hits count triple).
+  const TOPICS = [
+    { id: "geo", name: "Geoeconomics", on: true, re: [/geo-?econom/, /geopolit/, /sanction/, /coerci/, /export controls?/, /fragmentation/, /friend-?shoring/, /de-?risking/, /decoupl/, /(national|economic) security/, /weaponi[sz]/, /statecraft/, /industrial polic/, /critical minerals?/, /rare earth/, /u\.?s\.?-china|china-u\.?s\./, /dollar dominance/, /reserve currenc/, /jel:.*\bf5\d/] },
+    { id: "trade", name: "Trade", on: true, re: [/\btrade\b(?!-off| ?offs?\b| credit)/, /tariff/, /\bimport(s|ed|ing|ers?)?\b/, /\bexport(s|ed|ing|ers?)?\b/, /(supply|value) chains?/, /offshor|reshor|nearshor/, /\bwto\b/, /protectionis/, /gravity (model|equation)/, /customs union/, /jel:.*\bf1\d/] },
+    { id: "synth", name: "Synthetic control", on: true, re: [/synthetic control/, /synthetic diff/, /synthetic did/, /synthetic counterfactual/, /comparative case stud/] },
+    { id: "money", name: "Monetary policy", re: [/monetary policy/, /central bank/, /interest rates?/, /inflation/, /jel:.*\be5\d/] },
+    { id: "finance", name: "Finance & banking", re: [/\bbanks?\b|banking/, /financial stability/, /asset pric/, /\bcredit\b/, /jel:.*\bg[12]\d/] },
+    { id: "labor", name: "Labor", re: [/labou?r market/, /\bwages?\b/, /employment/, /jel:.*\bj\d\d/] },
+    { id: "dev", name: "Development", re: [/developing countr/, /low-income countr/, /poverty/, /jel:.*\bo1\d/] },
+    { id: "climate", name: "Climate & energy", re: [/climate/, /carbon/, /emissions/, /\benergy\b/, /jel:.*\bq[45]\d/] },
+    { id: "ai", name: "AI & technology", re: [/artificial intelligence/, /\bai\b/, /machine learning/, /automation/, /large language model/] },
+    { id: "pol", name: "Political economy", re: [/election/, /voting|voters/, /populis/, /polariz/, /jel:.*\bd7\d/] },
+    { id: "fiscal", name: "Fiscal & public debt", re: [/fiscal/, /public debt|sovereign debt/, /\btax(es|ation)?\b/, /jel:.*\bh[56]\d/] },
+  ];
+  state.prefs = state.prefs || { topics: TOPICS.filter((t) => t.on).map((t) => t.id), custom: "", hiddenSources: [] };
+
+  const sourceGroup = (p) => (p.source || "NBER").replace(/^Fed .*/, "Fed");
+  const escapeRe = (k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const topicCache = new Map();
+  let active = [];
+  function activeTopics() {
+    const list = TOPICS.filter((t) => state.prefs.topics.includes(t.id));
+    state.prefs.custom.split(",").map((k) => k.trim().toLowerCase()).filter(Boolean)
+      .forEach((k) => list.push({ name: k, re: [new RegExp(escapeRe(k))] }));
+    return list;
   }
+  function matchedTopics(p) {
+    if (!topicCache.has(p.id)) {
+      const title = p.title.toLowerCase();
+      const body = ((p.abstract || p.summary || "") + " " + (p.keywords || "")).toLowerCase();
+      const hits = [];
+      for (const t of active) if (t.re.some((re) => re.test(title) || re.test(body))) hits.push(t.name);
+      topicCache.set(p.id, hits);
+    }
+    return topicCache.get(p.id);
+  }
+
+  function buildQueue() {
+    topicCache.clear();
+    active = activeTopics();
+    const pool = papers.filter((p) => !state.seen[p.id] && !state.prefs.hiddenSources.includes(sourceGroup(p)));
+    const relevant = [], other = [];
+    for (const p of pool) (matchedTopics(p).length ? relevant : other).push(p);
+    // papers.json is newest first; alternate 2 topic matches with 1 of the newest other papers
+    queue = [];
+    let r = 0, o = 0;
+    while (r < relevant.length || o < other.length) {
+      for (let k = 0; k < 2 && r < relevant.length; k++) queue.push(relevant[r++]);
+      if (o < other.length) queue.push(other[o++]);
+    }
+  }
+
+  // --- preferences sheet ---
+  function renderPrefs() {
+    $("topic-chips").innerHTML = TOPICS.map((t) => `<button type="button" data-topic="${t.id}" aria-pressed="${state.prefs.topics.includes(t.id)}">${esc(t.name)}</button>`).join("");
+    const sources = [...new Set(papers.map(sourceGroup))];
+    $("source-chips").innerHTML = sources.map((s) => `<button type="button" data-source="${esc(s)}" aria-pressed="${!state.prefs.hiddenSources.includes(s)}">${esc(s)}</button>`).join("");
+    $("custom-keywords").value = state.prefs.custom;
+  }
+  $("open-prefs").onclick = () => { renderPrefs(); $("prefs").hidden = false; };
+  $("prefs-form").onclick = (e) => {
+    const b = e.target.closest("button[aria-pressed]");
+    if (b) b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") !== "true");
+  };
+  $("prefs-form").onsubmit = (e) => {
+    e.preventDefault();
+    state.prefs.topics = [...document.querySelectorAll("[data-topic][aria-pressed=true]")].map((b) => b.dataset.topic);
+    state.prefs.hiddenSources = [...document.querySelectorAll("[data-source][aria-pressed=false]")].map((b) => b.dataset.source);
+    state.prefs.custom = $("custom-keywords").value;
+    persist();
+    $("prefs").hidden = true;
+    buildQueue(); render();
+  };
+  $("prefs").onclick = (e) => { if (e.target.id === "prefs") $("prefs-form").requestSubmit(); };
 
   // --- rendering ---
   function cardHTML(p) {
     const authors = p.authors.length > 4 ? p.authors.slice(0, 4).join(", ") + " et al." : p.authors.join(", ");
     return `
-      <div class="top"><span class="year">${esc(p.year)}</span><span class="wp">${esc(p.id)} · ${esc(p.displaydate)}</span></div>
+      <div class="top"><span class="year">${esc(p.year)}</span><span class="wp"><span class="src">${esc(p.source || "NBER")}</span> ${esc(p.displaydate)}</span></div>
       <h2>${esc(p.title)}</h2>
       <p class="authors">${esc(authors)}</p>
+      ${matchedTopics(p).length ? `<div class="tags">${matchedTopics(p).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
       <p class="summary"><span class="label">${p.ai_summary ? "Summary" : "From the abstract"}</span>${esc(p.summary)}</p>
       <span class="open-hint">Tap to open paper ↗</span>
       <span class="stamp yes">SAVE</span><span class="stamp no">SKIP</span>`;
@@ -229,7 +334,7 @@
     list.innerHTML = state.saved.map((p) => `
       <li class="item">
         <a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a>
-        <div class="sub">${esc(p.year)} · ${esc(p.authors.join(", "))}</div>
+        <div class="sub">${esc(p.source || "NBER")} · ${esc(p.year)}${p.authors.length ? " · " + esc(p.authors.join(", ")) : ""}</div>
         <p>${esc(p.summary)}</p>
         <div class="row"><button class="btn" data-remove="${esc(p.id)}">Remove</button></div>
       </li>`).join("");
@@ -340,7 +445,7 @@
   };
 
   document.addEventListener("keydown", (e) => {
-    if ($("discover").hidden || e.metaKey || e.ctrlKey || e.altKey) return;
+    if ($("discover").hidden || !$("prefs").hidden || e.target.closest("input") || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === "ArrowLeft") decide("L");
     else if (e.key === "ArrowRight") decide("R");
     else if (e.key === "Enter") open(queue[0]);
