@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#1f3a5f"/>
+  <!-- axes -->
+  <path d="M112 84 V400 H428" fill="none" stroke="#f6f4ef" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- demand: downward sloping -->
+  <path d="M150 128 Q 240 300 400 360" fill="none" stroke="#7cb7e3" stroke-width="26" stroke-linecap="round"/>
+  <!-- supply: upward sloping -->
+  <path d="M150 352 Q 300 300 400 120" fill="none" stroke="#f0a35e" stroke-width="26" stroke-linecap="round"/>
+  <!-- equilibrium guides + point -->
+  <path d="M112 283 H270 M270 283 V400" fill="none" stroke="#f6f4ef" stroke-opacity=".45" stroke-width="10" stroke-dasharray="4 18" stroke-linecap="round"/>
+  <circle cx="270" cy="283" r="24" fill="#f6f4ef"/>
+</svg>
