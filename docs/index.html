@@ -140,6 +140,16 @@
   .field input { display: block; width: 100%; margin-top: 6px; font: inherit; font-weight: 400; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
   .modal .row { display: flex; justify-content: flex-end; margin-top: 18px; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .seg { display: inline-flex; background: var(--line); border-radius: 10px; padding: 3px; margin-bottom: 12px; }
+  .seg button { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; padding: 5px 12px; border-radius: 8px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  details.group { margin-bottom: 14px; }
+  details.group > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; padding: 4px 2px 8px; }
+  details.group > summary::-webkit-details-marker { display: none; }
+  details.group > summary::before { content: "▸"; color: var(--muted); font-size: 12px; transition: transform .15s; }
+  details.group[open] > summary::before { transform: rotate(90deg); }
+  details.group > summary .count { color: var(--muted); font-weight: 600; font-size: 13px; }
+  .item .tags { margin: 6px 0 0; }
   .toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); opacity: 0;
     background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 10px; font-size: 14px;
@@ -179,7 +189,11 @@
         <button class="btn" id="reset" title="Show skipped papers again">Reset skipped</button>
       </div>
     </div>
-    <ul class="list" id="saved-list"></ul>
+    <div class="seg" id="saved-view" role="group" aria-label="Group saved papers">
+      <button type="button" data-view="topic">By topic</button>
+      <button type="button" data-view="recent">Recent</button>
+    </div>
+    <div id="saved-list"></div>
   </section>
 </main>
 <div class="modal" id="prefs" hidden>
@@ -209,6 +223,7 @@
   const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
 
   let papers = [];
+  let papersById = new Map();
   let queue = [];
 
   // --- topics & ranking ---
@@ -369,20 +384,68 @@
     $("saved-count").textContent = state.saved.length ? `(${state.saved.length})` : "";
   }
 
-  function renderSaved() {
-    const list = $("saved-list");
-    if (!state.saved.length) {
-      list.innerHTML = `<li class="none">Nothing saved yet. Swipe right on papers you want to read later.</li>`;
-      return;
+  // Saved papers grouped by their best-matching topic: your topics first, then other presets, then "Other".
+  function savedGroups() {
+    const topics = [...activeTopics(), ...TOPICS.filter((t) => !state.prefs.topics.includes(t.id))];
+    const groups = new Map(topics.map((t) => [t.name, []]));
+    groups.set("Other", []);
+    for (const snap of state.saved) {
+      const full = papersById.get(snap.id) || snap; // saved copies drop the abstract; use it when still available
+      const title = full.title.toLowerCase();
+      const body = ((full.abstract || full.summary || "") + " " + (full.keywords || "")).toLowerCase();
+      const scored = topics.map((t) => [t.name, topicScore(t, title, body)]).filter(([, sc]) => sc >= 2);
+      const best = scored.reduce((a, b) => (b[1] > a[1] ? b : a), scored[0]); // ties go to the earlier topic
+      groups.get(best ? best[0] : "Other").push({ p: snap, also: scored.map(([n]) => n).filter((n) => n !== (best && best[0])) });
     }
-    list.innerHTML = state.saved.map((p) => `
+    return [...groups].filter(([, items]) => items.length);
+  }
+
+  function savedItemHTML(p, also = []) {
+    return `
       <li class="item">
         <a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a>
         <div class="sub">${esc(p.source || "NBER")} · ${esc(p.year)}${p.authors.length ? " · " + esc(p.authors.join(", ")) : ""}</div>
         <p>${esc(p.summary)}</p>
+        ${also.length ? `<div class="tags">${also.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
         <div class="row"><button class="btn" data-remove="${esc(p.id)}">Remove</button></div>
-      </li>`).join("");
+      </li>`;
   }
+
+  function renderSaved() {
+    const list = $("saved-list");
+    const view = state.savedView || "topic";
+    $("saved-view").hidden = !state.saved.length;
+    for (const b of $("saved-view").querySelectorAll("button")) b.setAttribute("aria-pressed", b.dataset.view === view);
+    if (!state.saved.length) {
+      list.innerHTML = `<p class="none">Nothing saved yet. Swipe right on papers you want to read later.</p>`;
+      return;
+    }
+    if (view === "recent") {
+      list.innerHTML = `<ul class="list">${state.saved.map((p) => savedItemHTML(p)).join("")}</ul>`;
+      return;
+    }
+    const closed = state.closedGroups || [];
+    list.innerHTML = savedGroups().map(([name, items]) => `
+      <details class="group" data-group="${esc(name)}"${closed.includes(name) ? "" : " open"}>
+        <summary>${esc(name)} <span class="count">${items.length}</span></summary>
+        <ul class="list">${items.map(({ p, also }) => savedItemHTML(p, also)).join("")}</ul>
+      </details>`).join("");
+  }
+  $("saved-view").onclick = (e) => {
+    const view = e.target.dataset.view;
+    if (!view) return;
+    state.savedView = view;
+    persist(); renderSaved();
+  };
+  // remember which topic sections are collapsed
+  $("saved-list").addEventListener("toggle", (e) => {
+    const name = e.target.dataset && e.target.dataset.group;
+    if (!name) return;
+    const closed = new Set(state.closedGroups || []);
+    e.target.open ? closed.delete(name) : closed.add(name);
+    state.closedGroups = [...closed];
+    persist();
+  }, true);
 
   // --- actions ---
   function decide(dir) {
@@ -483,7 +546,10 @@
     persist(); buildQueue(); render(); toast("Skipped papers are back in the deck");
   };
   $("copy").onclick = async () => {
-    const text = state.saved.map((p) => `${p.title} (${p.year}) — ${p.url}`).join("\n");
+    const line = (p) => `${p.title} (${p.source || "NBER"}, ${p.year}) — ${p.url}`;
+    const text = (state.savedView || "topic") === "topic"
+      ? savedGroups().map(([name, items]) => `${name}\n${items.map(({ p }) => "- " + line(p)).join("\n")}`).join("\n\n")
+      : state.saved.map(line).join("\n");
     try { await navigator.clipboard.writeText(text); toast("Copied " + state.saved.length + " papers"); }
     catch { toast("Couldn't copy"); }
   };
@@ -507,6 +573,7 @@
     .then((r) => r.json())
     .then((data) => {
       papers = data.papers;
+      papersById = new Map(papers.map((p) => [p.id, p]));
       $("updated").textContent = data.updated ? `Updated ${data.updated}` : "";
       buildQueue(); render();
     })
